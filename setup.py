@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'turtle_tf2_listener = learning_tf2_py.turtle_tf2_listener:main',
         ],
     },
 )
