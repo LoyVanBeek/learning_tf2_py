@@ -23,28 +23,32 @@ from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
 from rclpy.time import Time, CONVERSION_CONSTANT
 
+import pandas as pd
+
 
 class FrameListener(Node):
 
-    def __init__(self):
+    def __init__(self, queue_size=100):
         super().__init__('turtle_tf2_frame_listener')
 
         # Declare and acquire `target_frame` parameter
         self.declare_parameter('target_frame', 'dummy0')
         self.target_frame = self.get_parameter(
             'target_frame').get_parameter_value().string_value
-    
+
         self.subscription = self.create_subscription(
             TFMessage,
             '/tf',
             self.listener_callback,
-            100)
+            queue_size)
         self.subscription  # prevent unused variable warning
 
         self.counter = 0
 
+        self.delay_data = []
 
-        self.get_logger().info(f'Running...')
+
+        self.get_logger().info(f'Running with queue_size={queue_size}')
 
     def listener_callback(self, msg: TFMessage):
         current_time = self.get_clock().now()  # type: Time
@@ -58,14 +62,28 @@ class FrameListener(Node):
         self.get_logger().info(f'{self.counter}: Delay: "{secs}"')
 
         self.counter += 1
+        self.delay_data += [secs]
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Measure difference between received stamp and current time")
+    parser.add_argument(
+        "--queue-size",
+        "--queue_size",
+        type=int,
+        default=100,
+    )
+    args = parser.parse_args()
+    print(args)
+
     rclpy.init()
-    node = FrameListener()
+    node = FrameListener(args.queue_size)
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        pass
+        df = pd.DataFrame({'delay': node.delay_data})
+        print(df.describe())
 
     rclpy.shutdown()
