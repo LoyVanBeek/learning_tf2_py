@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-
-from geometry_msgs.msg import Twist
-
 import rclpy
 from rclpy.node import Node
 
@@ -23,7 +19,9 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
-from turtlesim.srv import Spawn
+from tf2_msgs.msg import TFMessage
+from geometry_msgs.msg import TransformStamped
+from rclpy.time import Time, CONVERSION_CONSTANT
 
 
 class FrameListener(Node):
@@ -32,82 +30,34 @@ class FrameListener(Node):
         super().__init__('turtle_tf2_frame_listener')
 
         # Declare and acquire `target_frame` parameter
-        self.declare_parameter('target_frame', 'turtle1')
+        self.declare_parameter('target_frame', 'dummy0')
         self.target_frame = self.get_parameter(
             'target_frame').get_parameter_value().string_value
+    
+        self.subscription = self.create_subscription(
+            TFMessage,
+            '/tf',
+            self.listener_callback,
+            100)
+        self.subscription  # prevent unused variable warning
 
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.counter = 0
 
-        # Create a client to spawn a turtle
-        self.spawner = self.create_client(Spawn, 'spawn')
-        # Boolean values to store the information
-        # if the service for spawning turtle is available
-        self.turtle_spawning_service_ready = False
-        # if the turtle was successfully spawned
-        self.turtle_spawned = False
 
-        # Create turtle2 velocity publisher
-        self.publisher = self.create_publisher(Twist, 'turtle2/cmd_vel', 1)
+        self.get_logger().info(f'Running...')
 
-        # Call on_timer function every second
-        self.timer = self.create_timer(1.0, self.on_timer)
+    def listener_callback(self, msg: TFMessage):
+        current_time = self.get_clock().now()  # type: Time
+        last_transform = msg.transforms[-1]  # type: TransformStamped
+        last_transform_time = Time.from_msg(last_transform.header.stamp)  # type: Time
 
-    def on_timer(self):
-        # Store frame names in variables that will be used to
-        # compute transformations
-        from_frame_rel = self.target_frame
-        to_frame_rel = 'turtle2'
+        delay = current_time - last_transform_time
+        delay_ns = delay.nanoseconds
+        secs_nsecs = (delay_ns // CONVERSION_CONSTANT, (delay_ns % CONVERSION_CONSTANT) / CONVERSION_CONSTANT)
+        secs = sum(secs_nsecs)
+        self.get_logger().info(f'{self.counter}: Delay: "{secs}"')
 
-        if self.turtle_spawning_service_ready:
-            if self.turtle_spawned:
-                # Look up for the transformation between target_frame and turtle2 frames
-                # and send velocity commands for turtle2 to reach target_frame
-                try:
-                    now = rclpy.time.Time()
-                    trans = self.tf_buffer.lookup_transform(
-                        to_frame_rel,
-                        from_frame_rel,
-                        now)
-                except TransformException as ex:
-                    self.get_logger().info(
-                        f'Could not transform {to_frame_rel} to {from_frame_rel}: {ex}')
-                    return
-
-                msg = Twist()
-                scale_rotation_rate = 1.0
-                msg.angular.z = scale_rotation_rate * math.atan2(
-                    trans.transform.translation.y,
-                    trans.transform.translation.x)
-
-                scale_forward_speed = 0.5
-                msg.linear.x = scale_forward_speed * math.sqrt(
-                    trans.transform.translation.x ** 2 +
-                    trans.transform.translation.y ** 2)
-
-                self.publisher.publish(msg)
-            else:
-                if self.result.done():
-                    self.get_logger().info(
-                        f'Successfully spawned {self.result.result().name}')
-                    self.turtle_spawned = True
-                else:
-                    self.get_logger().info('Spawn is not finished')
-        else:
-            if self.spawner.service_is_ready():
-                # Initialize request with turtle name and coordinates
-                # Note that x, y and theta are defined as floats in turtlesim/srv/Spawn
-                request = Spawn.Request()
-                request.name = 'turtle2'
-                request.x = float(4)
-                request.y = float(2)
-                request.theta = float(0)
-                # Call request
-                self.result = self.spawner.call_async(request)
-                self.turtle_spawning_service_ready = True
-            else:
-                # Check if the service is ready
-                self.get_logger().info('Service is not ready')
+        self.counter += 1
 
 
 def main():
